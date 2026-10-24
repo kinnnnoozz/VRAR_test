@@ -381,12 +381,6 @@ function bar(label, v, x, y) {
   fill(94, 240, 220); rect(x + 120, y - 10, 220 * constrain(v, 0, 1), 10, 3);
 }
 
-function drawStartHint() {
-  noStroke(); fill(5, 10, 18, 210); rect(0, 262, VIEW_PX, 76);
-  fill(94, 240, 220); textSize(16); textStyle(BOLD); textAlign(CENTER, CENTER);
-  text("화면을 클릭하면 소리가 켜집니다", VIEW_PX / 2, 300);
-  textAlign(LEFT, BASELINE); textStyle(NORMAL); textSize(13);
-}
 
 // ---------- 입력 ----------
 function overView() { return mouseX >= 0 && mouseX < VIEW_PX && mouseY >= 0 && mouseY < height; }
