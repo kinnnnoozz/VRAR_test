@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>빛으로 부르고, 소리로 본다 · 반사 사운드 테스트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #E9EFF2; --surface: #FFFFFF; --line: #C9D4DB; --text: #0B1620; --muted: #4F5F6C;
+  --accent: #0B7F73; --accent-ink: #FFFFFF; --stage: #050A12;
+  color-scheme: light;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #050A12; --surface: #0F1824; --line: #22303F; --text: #E8EEF2; --muted: #8A97A6;
+    --accent: #5EF0DC; --accent-ink: #06212A; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #050A12; --surface: #0F1824; --line: #22303F; --text: #E8EEF2; --muted: #8A97A6;
+  --accent: #5EF0DC; --accent-ink: #06212A; color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: inherit; }
+html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font-family: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  font-size: 16px; line-height: 1.65;
+}
+.wrap { max-width: 1040px; margin: 0 auto; padding: 40px 20px 56px; }
+header h1 { font-size: clamp(28px, 4.5vw, 44px); line-height: 1.2; margin: 0 0 10px; letter-spacing: -0.02em; }
+header p { margin: 0; color: var(--muted); max-width: 62ch; }
+.stage {
+  margin-top: 28px; background: var(--stage); border-radius: 14px; overflow: hidden;
+  border: 1px solid var(--line);
+}
+#sketch { overflow-x: auto; }
+#sketch canvas { display: block; width: 100% !important; height: auto !important; max-width: 100%; touch-action: none; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.controls button {
+  font: inherit; font-size: 14px; padding: 8px 14px; border-radius: 8px; cursor: pointer;
+  background: var(--surface); color: var(--text); border: 1px solid var(--line);
+}
+.controls button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.controls button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.controls .primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
+.guide { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 32px; margin-top: 40px; }
+.guide h2 { font-size: 18px; margin: 0 0 12px; }
+.guide dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; font-size: 15px; }
+.guide dt { color: var(--accent); font-weight: 700; }
+.guide dd { margin: 0; color: var(--muted); }
+.note { margin-top: 32px; font-size: 14px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>빛으로 부르고, 소리로 본다</h1>
+    <p>초롱아귀 움벨트 프로젝트의 반사 사운드 테스트입니다. 어둠 속 흰 부조를 머리 위 빛으로 비추면, 빛이 닿는 위치와 반사되는 모양이 실시간으로 소리가 됩니다.</p>
+  </header>
+
+  <div class="stage"><div id="sketch"></div></div>
+
+  <div class="controls" role="group" aria-label="조작">
+    <button id="btnSound" class="primary" type="button" onclick="toggleSound()">소리 켜기</button>
+    <button id="btnHmd" type="button" aria-pressed="false" onclick="toggleHmd()">HMD 화면</button>
+    <button id="btnQuant" type="button" aria-pressed="false" onclick="toggleQuant()">음계 고정</button>
+    <button type="button" onclick="changeLed(-0.1)">LED 어둡게</button>
+    <button type="button" onclick="changeLed(0.1)">LED 밝게</button>
+    <button type="button" onclick="resetCam()">처음 위치로</button>
+  </div>
+
+  <section class="guide">
+    <div>
+      <h2>조작</h2>
+      <dl>
+        <dt>마우스 이동</dt><dd>빛이 닿는 지점</dd>
+        <dt>왼쪽 드래그</dt><dd>머리(카메라와 광원) 이동. 빛은 누른 지점에 고정되고 비추는 각도만 바뀝니다</dd>
+        <dt>마우스 휠</dt><dd>부조에 다가가기, 물러나기</dd>
+        <dt>키보드</dt><dd>V 화면 전환, Q 음계, M 소리, R 초기화, ↑↓ LED 밝기</dd>
+      </dl>
+    </div>
+    <div>
+      <h2>소리로 바뀌는 것</h2>
+      <dl>
+        <dt>A 위치</dt><dd>세로 위치는 음높이(위로 갈수록 높게), 가로 위치는 박동 속도(오른쪽으로 갈수록 빠르게), 머리 기준 방향은 좌우 패닝</dd>
+        <dt>B 반사</dt><dd>평균 밝기는 바탕 음량, 하이라이트 면적은 톱니파, 대비는 음색의 밝기, 결은 배음, 변화량은 순간적인 노이즈</dd>
+      </dl>
+    </div>
+  </section>
+
+  <p class="note">헤드폰을 쓰면 좌우 패닝까지 들립니다. 화면 크기가 넓은 컴퓨터에서 보기에 맞춰져 있습니다.</p>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+<script>
+// ---------- 장면 ----------
+const RES = 320, VW = 300, VH = 300, VIEW_PX = 600, MINI = 200;
+const FOV = 0.9, POWER = 0.53;
+const COS_IN = Math.cos(5 * Math.PI / 180), COS_OUT = Math.cos(13 * Math.PI / 180);
+
+// ---------- 튜닝값 ----------
+const HI_THR = 0.6, DRONE_GAIN = 3.0, SAW_GAIN = 2.5, SHIMMER_GAIN = 4.0;
+const EVENT_THR = 0.002, EVENT_GAIN = 40, EVENT_DECAY = 0.85, SMOOTH = 0.2;
+
+let hMap, nxA, nyA, nzA, view, mini, bright, prevBright, trail;
+let camX = 0.5, camY = 0.45, camD = 0.7, hitX = 0.5, hitY = 0.45;
+let dragging = false, lastX = 0, lastY = 0, pointerSeen = false;
+let led = 1.0, hmdMode = false, quantize = false, muted = false;
+let fMean = 0, fArea = 0, fContrast = 0, fEdge = 0, rawChange = 0;
+let curFreq = 220, phase = 0, hissAmp = 0, outFreq = 220, outRate = 1, outPan = 0, outCutoff = 300;
+
+// ---------- 소리 (Web Audio) ----------
+let AC = null;
+const N = {};
+
+function startAudio() {
+  if (AC) { if (AC.state !== "running") AC.resume(); return; }
+  AC = new (window.AudioContext || window.webkitAudioContext)();
+  N.master = AC.createGain(); N.master.gain.value = muted ? 0 : 0.6; N.master.connect(AC.destination);
+  const chain = (src, ...nodes) => { let a = src; nodes.forEach(n => { a.connect(n); a = n; }); a.connect(N.master); };
+  const osc = (type, f) => { const o = AC.createOscillator(); o.type = type; o.frequency.value = f; o.start(); return o; };
+  const gain = () => { const g = AC.createGain(); g.gain.value = 0; return g; };
+
+  N.drone = { o: osc("sine", 220), g: gain(), p: AC.createStereoPanner() };
+  chain(N.drone.o, N.drone.g, N.drone.p);
+
+  N.saw = { o: osc("sawtooth", 110), lp: AC.createBiquadFilter(), g: gain(), p: AC.createStereoPanner() };
+  N.saw.lp.type = "lowpass"; N.saw.lp.frequency.value = 800;
+  chain(N.saw.o, N.saw.lp, N.saw.g, N.saw.p);
+
+  N.shim = { o: osc("triangle", 440), g: gain(), p: AC.createStereoPanner() };
+  chain(N.shim.o, N.shim.g, N.shim.p);
+
+  const buf = AC.createBuffer(1, AC.sampleRate * 2, AC.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  const ns = AC.createBufferSource(); ns.buffer = buf; ns.loop = true; ns.start();
+  N.hiss = { bp: AC.createBiquadFilter(), g: gain(), p: AC.createStereoPanner() };
+  N.hiss.bp.type = "bandpass"; N.hiss.bp.Q.value = 3;
+  chain(ns, N.hiss.bp, N.hiss.g, N.hiss.p);
+  updateButtons();
+}
+
+function setP(param, v, tc) { param.setTargetAtTime(v, AC.currentTime, tc || 0.03); }
+
+// ---------- p5 ----------
+function setup() {
+  const c = createCanvas(1000, 600);
+  c.parent("sketch");
+  c.elt.setAttribute("role", "img");
+  c.elt.setAttribute("aria-label", "어둠 속 흰 부조를 빛으로 비추는 시뮬레이션과 반사 특징, 소리 값을 보여주는 화면");
+  frameRate(60);
+  textFont("Noto Sans KR");
+  buildRelief();
+  buildMinimap();
+  view = createImage(VW, VH);
+  bright = new Float32Array(VW * VH);
+  prevBright = new Float32Array(VW * VH);
+  trail = new Float32Array(VW * VH);
+}
+
+function draw() {
+  background(8, 12, 18);
+  const span = camD * FOV;
+
+  if (!dragging && pointerSeen && mouseX >= 0 && mouseX < VIEW_PX && mouseY >= 0 && mouseY < height) {
+    hitX = camX + (mouseX / VIEW_PX - 0.5) * span;
+    hitY = camY + (mouseY / VIEW_PX - 0.5) * span;
+  }
+
+  renderView(span);
+  updateSound(span);
+
+  image(view, 0, 0, VIEW_PX, VIEW_PX);
+  drawMarker(span);
+  drawPanel(span);
+  if (!AC || AC.state !== "running") drawStartHint();
+}
+
+// ---------- 반사 렌더링 + 특징 추출 ----------
+function renderView(span) {
+  const lx = camX, ly = camY - 0.04, lz = camD + 0.03;
+  let bx = hitX - lx, by = hitY - ly, bz = heightAt(hitX, hitY) - lz;
+  const bl = Math.hypot(bx, by, bz);
+  bx /= bl; by /= bl; bz /= bl;
+
+  let sum = 0, chg = 0, hi = 0, lit = 0, litSum = 0, litSq = 0, litEdge = 0;
+  view.loadPixels();
+  const px4 = view.pixels;
+
+  for (let j = 0; j < VH; j++) {
+    const py = camY + ((j + 0.5) / VH - 0.5) * span;
+    for (let i = 0; i < VW; i++) {
+      const px = camX + ((i + 0.5) / VW - 0.5) * span;
+      const idx = j * VW + i;
+
+      let pz = 0, nx = 0, ny = 0, nz = 1, alb = 0.12;
+      if (px >= 0 && px < 1 && py >= 0 && py < 1) {
+        const g = Math.floor(py * RES) * RES + Math.floor(px * RES);
+        pz = hMap[g]; nx = nxA[g]; ny = nyA[g]; nz = nzA[g]; alb = 0.92;
+      }
+
+      let tx = px - lx, ty = py - ly, tz = pz - lz;
+      const d2 = tx * tx + ty * ty + tz * tz, d = Math.sqrt(d2);
+      tx /= d; ty /= d; tz /= d;
+      const spot = smoothstepF(COS_OUT, COS_IN, tx * bx + ty * by + tz * bz);
+
+      let b = 0;
+      if (spot > 0) {
+        const diff = Math.max(0, -(nx * tx + ny * ty + nz * tz));
+        const vx = camX - px, vy = camY - py, vz = camD - pz;
+        const vl = Math.sqrt(vx * vx + vy * vy + vz * vz);
+        const hx = -tx + vx / vl, hy = -ty + vy / vl, hz = -tz + vz / vl;
+        const hl = Math.sqrt(hx * hx + hy * hy + hz * hz);
+        const ndh = Math.max(0, (nx * hx + ny * hy + nz * hz) / hl);
+        const spec = Math.pow(ndh, 30) * 0.45;
+        const x = spot * (diff + spec) * alb * POWER * led / d2;
+        b = 1 - Math.exp(-1.4 * x);
+      }
+      bright[idx] = b;
+
+      sum += b;
+      if (b > HI_THR) hi++;
+      chg += Math.abs(b - prevBright[idx]);
+
+      const e = (i > 0 && j > 0) ? Math.abs(b - bright[idx - 1]) + Math.abs(b - bright[idx - VW]) : 0;
+      if (spot > 0.5) { lit++; litSum += b; litSq += b * b; litEdge += e; }
+
+      const target = (b > HI_THR * 0.8 && e > 0.06) ? 1 : 0;
+      trail[idx] = Math.max(trail[idx] * 0.93, target);
+
+      const o = idx * 4;
+      if (hmdMode) {
+        const t = trail[idx];
+        px4[o] = 94 * t; px4[o + 1] = 240 * t; px4[o + 2] = 220 * t;
+      } else {
+        const v = b * 255;
+        px4[o] = v; px4[o + 1] = v; px4[o + 2] = v;
+      }
+      px4[o + 3] = 255;
+    }
+  }
+  view.updatePixels();
+  prevBright.set(bright);
+
+  const n = VW * VH;
+  let contrast = 0, edge = 0;
+  if (lit > 20) {
+    const m = litSum / lit;
+    contrast = Math.sqrt(Math.max(0, litSq / lit - m * m));
+    edge = litEdge / lit;
+  }
+  rawChange = frameCount < 5 ? 0 : chg / n;
+  fMean = lerp(fMean, sum / n, SMOOTH);
+  fArea = lerp(fArea, hi / n, SMOOTH);
+  fContrast = lerp(fContrast, contrast, SMOOTH);
+  fEdge = lerp(fEdge, edge, SMOOTH);
+}
+
+function updateSound(span) {
+  const v = constrain(hitY, 0, 1), u = constrain(hitX, 0, 1);
+  let target = 110 * Math.pow(2, (1 - v) * 3);
+  if (quantize) target = quantizePenta(target);
+  curFreq = lerp(curFreq, target, quantize ? 0.5 : 0.15);
+
+  outFreq = curFreq;
+  outRate = Math.pow(10, u);
+  outPan = constrain((hitX - camX) / (span * 0.5), -1, 1);
+  outCutoff = 300 + fContrast * 8000;
+
+  phase += TWO_PI * outRate * Math.min(deltaTime, 100) / 1000;
+  if (phase > TWO_PI) phase -= TWO_PI;
+  const gate = 0.25 + 0.75 * Math.pow(0.5 + 0.5 * Math.sin(phase), 4);
+
+  const droneA = constrain(fMean * DRONE_GAIN, 0, 0.3) * gate;
+  const sawA = constrain(fArea * SAW_GAIN, 0, 0.15) * gate;
+  const shimA = constrain((fEdge - 0.01) * SHIMMER_GAIN, 0, 0.12);
+  hissAmp = Math.max(hissAmp * EVENT_DECAY, constrain((rawChange - EVENT_THR) * EVENT_GAIN, 0, 0.3));
+
+  if (!AC) return;
+  setP(N.drone.o.frequency, curFreq); setP(N.drone.g.gain, droneA, 0.012); setP(N.drone.p.pan, outPan);
+  setP(N.saw.o.frequency, curFreq * 0.5); setP(N.saw.g.gain, sawA, 0.012); setP(N.saw.p.pan, outPan);
+  setP(N.saw.lp.frequency, outCutoff);
+  setP(N.shim.o.frequency, curFreq * 2); setP(N.shim.g.gain, shimA); setP(N.shim.p.pan, outPan);
+  setP(N.hiss.g.gain, hissAmp, 0.015); setP(N.hiss.p.pan, outPan); setP(N.hiss.bp.frequency, curFreq * 3);
+}
+
+function quantizePenta(f) {
+  const scale = [0, 3, 5, 7, 10], base = 57;
+  let m = Math.round(69 + 12 * Math.log2(f / 440));
+  while (!scale.includes(((m - base) % 12 + 12) % 12)) m--;
+  return 440 * Math.pow(2, (m - 69) / 12);
+}
+
+// ---------- 부조 ----------
+function buildRelief() {
+  const h = new Float32Array(RES * RES);
+  for (let j = 0; j < RES; j++) {
+    for (let i = 0; i < RES; i++) {
+      const x = (i + 0.5) / RES, y = (j + 0.5) / RES;
+      let v = 0;
+      const r = Math.max(Math.abs(x - 0.27), Math.abs(y - 0.27));
+      if (r < 0.19 && Math.floor(r / 0.038) % 2 === 0) v += 0.010;
+      const d = Math.hypot(x - 0.72, y - 0.27);
+      if (d < 0.17) v += 0.07 * Math.sqrt(1 - (d / 0.17) ** 2);
+      if (x > 0.08 && x < 0.92 && y > 0.56 && y < 0.92) {
+        const t = (y - 0.56) / 0.36 * 8;
+        if (t - Math.floor(t) < 0.45) v += 0.008;
+      }
+      h[j * RES + i] = v;
+    }
+  }
+  hMap = blur(blur(h));
+  nxA = new Float32Array(RES * RES); nyA = new Float32Array(RES * RES); nzA = new Float32Array(RES * RES);
+  const cell = 1 / RES;
+  for (let j = 0; j < RES; j++) {
+    for (let i = 0; i < RES; i++) {
+      const il = Math.max(i - 1, 0), ir = Math.min(i + 1, RES - 1), ju = Math.max(j - 1, 0), jd = Math.min(j + 1, RES - 1);
+      const gx = (hMap[j * RES + ir] - hMap[j * RES + il]) / ((ir - il) * cell);
+      const gy = (hMap[jd * RES + i] - hMap[ju * RES + i]) / ((jd - ju) * cell);
+      const l = Math.sqrt(gx * gx + gy * gy + 1), k = j * RES + i;
+      nxA[k] = -gx / l; nyA[k] = -gy / l; nzA[k] = 1 / l;
+    }
+  }
+}
+
+function blur(s) {
+  const o = new Float32Array(RES * RES);
+  for (let j = 0; j < RES; j++) {
+    for (let i = 0; i < RES; i++) {
+      let acc = 0, c = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const x = i + dx, y = j + dy;
+        if (x >= 0 && x < RES && y >= 0 && y < RES) { acc += s[y * RES + x]; c++; }
+      }
+      o[j * RES + i] = acc / c;
+    }
+  }
+  return o;
+}
+
+function heightAt(x, y) {
+  if (x < 0 || x >= 1 || y < 0 || y >= 1) return 0;
+  return hMap[Math.floor(y * RES) * RES + Math.floor(x * RES)];
+}
+
+function smoothstepF(e0, e1, x) {
+  const t = constrain((x - e0) / (e1 - e0), 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+// ---------- 화면 ----------
+function buildMinimap() {
+  mini = createImage(MINI, MINI);
+  mini.loadPixels();
+  let lx = -0.5, ly = -0.6, lz = 0.62;
+  const l = Math.hypot(lx, ly, lz); lx /= l; ly /= l; lz /= l;
+  for (let j = 0; j < MINI; j++) {
+    for (let i = 0; i < MINI; i++) {
+      const g = Math.floor((j + 0.5) / MINI * RES) * RES + Math.floor((i + 0.5) / MINI * RES);
+      const s = (0.18 + 0.5 * Math.max(0, nxA[g] * lx + nyA[g] * ly + nzA[g] * lz)) * 0.7 * 255;
+      const o = (j * MINI + i) * 4;
+      mini.pixels[o] = s * 0.85; mini.pixels[o + 1] = s * 0.95; mini.pixels[o + 2] = s; mini.pixels[o + 3] = 255;
+    }
+  }
+  mini.updatePixels();
+}
+
+function drawMarker(span) {
+  const sx = ((hitX - camX) / span + 0.5) * VIEW_PX;
+  const sy = ((hitY - camY) / span + 0.5) * VIEW_PX;
+  noFill(); stroke(94, 240, 220, dragging ? 220 : 110); strokeWeight(1.5);
+  ellipse(sx, sy, 16, 16);
+  strokeWeight(1);
+  if (dragging) {
+    noStroke(); fill(94, 240, 220); textSize(13); textStyle(NORMAL);
+    text("머리 이동 중, 빛은 이 지점에 고정", 14, 24);
+  }
+  stroke(40); line(VIEW_PX, 0, VIEW_PX, height);
+}
+
+function drawPanel(span) {
+  const x0 = VIEW_PX + 20, my = 32;
+  textSize(13); textStyle(NORMAL); noStroke();
+  fill(150); text("부조 전체 (위에서 본 모습)", x0, 22);
+  image(mini, x0, my);
+
+  const ctx = drawingContext;
+  ctx.save(); ctx.beginPath(); ctx.rect(x0, my, MINI, MINI); ctx.clip();
+  noFill(); stroke(94, 240, 220, 150);
+  rect(x0 + (camX - span / 2) * MINI, my + (camY - span / 2) * MINI, span * MINI, span * MINI);
+  const cx = x0 + camX * MINI, cy = my + camY * MINI, hx = x0 + hitX * MINI, hy = my + hitY * MINI;
+  stroke(94, 240, 220, 120); line(cx, cy, hx, hy);
+  noStroke(); fill(255, 230); ellipse(cx, cy, 8, 8);
+  fill(94, 240, 220); ellipse(hx, hy, 8, 8);
+  ctx.restore();
+
+  const lx = x0 + MINI + 16;
+  noStroke();
+  fill(230); text("흰색: 머리 위치", lx, my + 14);
+  fill(94, 240, 220); text("청록: 빛 닿는 곳", lx, my + 34);
+  fill(150);
+  text("거리  " + nf(camD, 0, 2), lx, my + 70);
+  text("LED  " + Math.round(led * 100) + "%", lx, my + 90);
+  text(hmdMode ? "보기: HMD" : "보기: 카메라", lx, my + 110);
+  text(quantize ? "음계: 펜타토닉" : "음계: 연속", lx, my + 130);
+  if (muted) { fill(240, 120, 110); text("음소거", lx, my + 150); }
+
+  const by = 262;
+  fill(94, 240, 220); text("반사 특징 (경로 B)", x0, by - 18);
+  bar("평균 밝기", fMean * 4, x0, by);
+  bar("하이라이트 면적", fArea * 8, x0, by + 22);
+  bar("대비", fContrast * 4, x0, by + 44);
+  bar("결 (엣지)", fEdge * 10, x0, by + 66);
+  bar("변화량", hissAmp / 0.3, x0, by + 88);
+
+  const sy = 404;
+  fill(94, 240, 220); text("소리", x0, sy);
+  fill(210);
+  text("음높이  " + Math.round(outFreq) + " Hz   ← 빛의 세로 위치", x0, sy + 22);
+  text("박동  " + nf(outRate, 0, 1) + " Hz   ← 빛의 가로 위치", x0, sy + 42);
+  text("패닝  " + nf(outPan, 0, 2) + "   ← 머리 기준 빛 방향", x0, sy + 62);
+  text("필터  " + Math.round(outCutoff) + " Hz   ← 대비", x0, sy + 82);
+
+  fill(110);
+  text("마우스 이동: 빛 위치 / 드래그: 머리 이동", x0, 532);
+  text("휠: 다가가기·물러나기 / ↑↓: LED 밝기", x0, 552);
+  text("V: HMD 보기 / Q: 음계 / M: 소리 / R: 초기화", x0, 572);
+}
+
+function bar(label, v, x, y) {
+  noStroke();
+  fill(170); text(label, x, y);
+  fill(30, 40, 52); rect(x + 120, y - 10, 220, 10, 3);
+  fill(94, 240, 220); rect(x + 120, y - 10, 220 * constrain(v, 0, 1), 10, 3);
+}
+
+function drawStartHint() {
+  noStroke(); fill(5, 10, 18, 210); rect(0, 262, VIEW_PX, 76);
+  fill(94, 240, 220); textSize(16); textStyle(BOLD); textAlign(CENTER, CENTER);
+  text("화면을 클릭하면 소리가 켜집니다", VIEW_PX / 2, 300);
+  textAlign(LEFT, BASELINE); textStyle(NORMAL); textSize(13);
+}
+
+// ---------- 입력 ----------
+function overView() { return mouseX >= 0 && mouseX < VIEW_PX && mouseY >= 0 && mouseY < height; }
+
+function mouseMoved() { pointerSeen = true; }
+
+function mousePressed() {
+  if (!overView()) return;
+  pointerSeen = true;
+  startAudio();
+  if (mouseButton === LEFT) { dragging = true; lastX = mouseX; lastY = mouseY; }
+}
+
+function mouseReleased() { dragging = false; }
+
+function mouseDragged() {
+  if (!dragging) return;
+  const span = camD * FOV;
+  camX = constrain(camX + (mouseX - lastX) * span / VIEW_PX, -0.3, 1.3);
+  camY = constrain(camY + (mouseY - lastY) * span / VIEW_PX, -0.3, 1.3);
+  lastX = mouseX; lastY = mouseY;
+}
+
+function mouseWheel(event) {
+  if (!overView()) return true;
+  camD = constrain(camD + Math.sign(event.delta) * 0.03, 0.25, 1.4);
+  return false;
+}
+
+function touchStarted() {
+  if (!overView()) return true;
+  pointerSeen = true;
+  startAudio();
+  return false;
+}
+function touchMoved() { return overView() ? false : true; }
+
+function keyPressed() {
+  const k = key.toLowerCase();
+  if (k === "v") toggleHmd();
+  else if (k === "q") toggleQuant();
+  else if (k === "m") toggleSound();
+  else if (k === "r") resetCam();
+  else if (keyCode === UP_ARROW) changeLed(0.1);
+  else if (keyCode === DOWN_ARROW) changeLed(-0.1);
+  else return true;
+  return false;
+}
+
+// ---------- 버튼 ----------
+function toggleSound() {
+  if (!AC || AC.state !== "running") { muted = false; startAudio(); if (N.master) N.master.gain.value = 0.6; }
+  else { muted = !muted; setP(N.master.gain, muted ? 0 : 0.6, 0.05); }
+  updateButtons();
+}
+function toggleHmd() { hmdMode = !hmdMode; updateButtons(); }
+function toggleQuant() { quantize = !quantize; updateButtons(); }
+function changeLed(d) { led = constrain(led + d, 0.1, 2); }
+function resetCam() { camX = 0.5; camY = 0.45; camD = 0.7; }
+
+function updateButtons() {
+  const on = AC && !muted;
+  const s = document.getElementById("btnSound");
+  s.textContent = on ? "소리 끄기" : "소리 켜기";
+  s.classList.toggle("primary", !on);
+  document.getElementById("btnHmd").setAttribute("aria-pressed", hmdMode);
+  document.getElementById("btnQuant").setAttribute("aria-pressed", quantize);
+}
+</script>
+</body>
+</html>
