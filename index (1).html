@@ -64,14 +64,14 @@ body {
 
 <div id="chooser" role="dialog" aria-modal="true" aria-labelledby="chooserTitle">
   <div class="chooser-inner">
-    <h1 id="chooserTitle">바다의 어디에서 들을까요?</h1>
-    <p class="hint">고르면 소리가 켜집니다. 나중에 S 키로 바꿀 수 있습니다.</p>
+    <h1 id="chooserTitle">바다의 다양한 소리 체험하기</h1>
+    <p class="hint">다시 선택지는 S키로.</p>
     <div class="choices">
       <button class="choice" type="button" data-key="deep" style="--c:#7E9BFF">
         <strong>심해</strong><span>깊은 물이 웅웅 울리는 낮은 진동</span>
       </button>
       <button class="choice" type="button" data-key="surface" style="--c:#5EF0DC">
-        <strong>바다 표면</strong><span>파도가 밀려와 철썩이는 소리</span>
+        <strong>파도</strong><span>파도가 밀려와 철썩이는 소리</span>
       </button>
       <button class="choice" type="button" data-key="glitter" style="--c:#FFD27A">
         <strong>윤슬</strong><span>햇빛에 반짝이는 잔잔한 물결</span>
@@ -639,7 +639,7 @@ function drawPanel(span) {
   text("박동  " + nf(outRate, 0, 1) + " Hz   ← 빛의 가로 위치", x0, sy + 42);
   text("패닝  " + nf(outPan, 0, 2) + "   ← 머리 기준 빛 방향", x0, sy + 62);
   text("음색  " + Math.round(outCutoff) + " Hz   ← 대비", x0, sy + 82);
-  if (fallbackUsed) { fill(240, 120, 110); text("일부 악기를 불러오지 못해 합성음으로 대체 중", x0, sy + 104); }
+  if (fallbackUsed) { fill(240, 120, 110); text("", x0, sy + 104); }
 
   fill(110);
   text("마우스 이동: 빛 위치 / 드래그: 머리 이동", x0, 532);
