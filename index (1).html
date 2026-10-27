@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>webTest</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #000000; --text: #E8EEF2; --muted: #8A97A6;
+  color-scheme: dark;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bg: #000000; --text: #E8EEF2; --muted: #8A97A6; color-scheme: dark; }
+}
+:root[data-theme="dark"] { --bg: #000000; --text: #E8EEF2; --muted: #8A97A6; color-scheme: dark; }
+*, *::before, *::after { box-sizing: inherit; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--text); overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  font-family: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+}
+#sketch { line-height: 0; }
+#sketch canvas {
+  display: block; touch-action: none;
+  width: min(100vw, calc((100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) * 5 / 3)) !important;
+  height: auto !important;
+}
+
+/* ---------- 소리 풍경 선택 화면 ---------- */
+#chooser {
+  position: fixed; inset: 0; z-index: 10;
+  display: flex; align-items: center; justify-content: center;
+  padding: calc(24px + env(safe-area-inset-top, 0px)) 24px calc(24px + env(safe-area-inset-bottom, 0px));
+  background: rgba(3, 6, 11, 0.92); line-height: 1.5;
+}
+#chooser[hidden] { display: none; }
+.chooser-inner { width: 100%; max-width: 780px; }
+#chooser h1 { font-size: clamp(22px, 3.2vw, 32px); margin: 0 0 6px; letter-spacing: -0.01em; }
+.hint { margin: 0 0 24px; color: var(--muted); font-size: 15px; }
+.choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+.choice {
+  font: inherit; text-align: left; cursor: pointer; color: var(--text);
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 20px 18px; border-radius: 12px; background: #0B131D;
+  border: 1px solid #22303F; border-top: 3px solid var(--c);
+}
+.choice strong { font-size: 19px; color: var(--c); }
+.choice span { font-size: 14px; color: var(--muted); }
+.choice:hover { border-color: var(--c); }
+.choice:focus-visible { outline: 2px solid var(--c); outline-offset: 2px; }
+.choice[disabled] { opacity: 0.5; cursor: progress; }
+.status { min-height: 1.5em; margin: 16px 0 0; font-size: 14px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main id="sketch"></main>
+
+<div id="chooser" role="dialog" aria-modal="true" aria-labelledby="chooserTitle">
+  <div class="chooser-inner">
+    <h1 id="chooserTitle">바다의 어디에서 들을까요?</h1>
+    <p class="hint">고르면 소리가 켜집니다. 나중에 S 키로 바꿀 수 있습니다.</p>
+    <div class="choices">
+      <button class="choice" type="button" data-key="deep" style="--c:#7E9BFF">
+        <strong>심해</strong><span>깊은 물이 웅웅 울리는 낮은 진동</span>
+      </button>
+      <button class="choice" type="button" data-key="surface" style="--c:#5EF0DC">
+        <strong>바다 표면</strong><span>파도가 밀려와 철썩이는 소리</span>
+      </button>
+      <button class="choice" type="button" data-key="glitter" style="--c:#FFD27A">
+        <strong>윤슬</strong><span>햇빛에 반짝이는 잔잔한 물결</span>
+      </button>
+    </div>
+    <p id="chooserStatus" class="status" aria-live="polite"></p>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+<script>
+// ---------- 장면 ----------
+const RES = 320, VW = 300, VH = 300, VIEW_PX = 600, MINI = 200;
+const FOV = 0.9, POWER = 0.53;
+const COS_IN = Math.cos(5 * Math.PI / 180), COS_OUT = Math.cos(13 * Math.PI / 180);
+
+// ---------- 튜닝값 ----------
+const HI_THR = 0.6, DRONE_GAIN = 3.0;
+const EVENT_THR = 0.002, EVENT_GAIN = 40, EVENT_DECAY = 0.85, SMOOTH = 0.2;
+
+let hMap, nxA, nyA, nzA, view, mini, bright, prevBright, trail;
+let camX = 0.5, camY = 0.45, camD = 0.7, hitX = 0.5, hitY = 0.45;
+let dragging = false, lastX = 0, lastY = 0, pointerSeen = false;
+let led = 1.0, hmdMode = false, quantize = false, muted = false;
+let fMean = 0, fArea = 0, fContrast = 0, fEdge = 0, rawChange = 0;
+let curFreq = 220, phase = 0, hissAmp = 0, outFreq = 220, outRate = 1, outPan = 0, outCutoff = 300;
+
+// ---------- 소리 풍경 (MIDI 악기: FluidR3_GM 사운드폰트) ----------
+const SF_URL = "https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/";
+// lead: 박동마다 울리는 음 / texture: 박동마다 함께 울리는 물소리(선택) / accent: 결·하이라이트가 강할 때 겹음 / event: 빛을 빠르게 움직일 때
+// durMul: 음 길이 배율 (길수록 음이 겹쳐 이어짐) / wobble: 환경음이 천천히 부풀었다 가라앉는 정도
+const THEMES = {
+  deep: {
+    label: "심해", color: [126, 155, 255], transpose: -24,
+    lead: "pad_7_halo", texture: null, accent: "voice_oohs", event: "pad_8_sweep",
+    accentSteps: [7, 12], eventNotes: [36, 40], eventCooldown: 1600,
+    leadGain: 0.8, textureGain: 0, accentGain: 0.35, eventGain: 0.5, durMul: 3.0,
+    droneType: "sine", droneMul: 1, droneGain: 1.2,
+    noise: { type: "lowpass", f: 180, q: 0.9, base: 0.08, move: 0.2, sweep: 60, wobbleHz: 0.12, wobble: 0.6 },
+    reverb: 0.7,
+  },
+  surface: {
+    label: "바다 표면", color: [94, 240, 220], transpose: -12,
+    lead: "timpani", texture: "seashore", accent: "steel_drums", event: "reverse_cymbal",
+    accentSteps: [12, 19], eventNotes: [48, 52], eventCooldown: 1200,
+    leadGain: 0.7, textureGain: 0.7, accentGain: 0.3, eventGain: 0.4, durMul: 1.3,
+    droneType: "triangle", droneMul: 0.5, droneGain: 0.3,
+    noise: { type: "bandpass", f: 900, q: 0.5, base: 0.05, move: 0.4, sweep: 400, wobbleHz: 0.09, wobble: 0.7 },
+    reverb: 0.35,
+  },
+  glitter: {
+    label: "윤슬", color: [255, 210, 122], transpose: 12,
+    lead: "celesta", texture: null, accent: "glockenspiel", event: "tinkle_bell",
+    accentSteps: [12, 19], eventNotes: [84, 88, 91], eventCooldown: 300,
+    leadGain: 0.55, textureGain: 0, accentGain: 0.4, eventGain: 0.25, durMul: 1.5,
+    droneType: "sine", droneMul: 0.5, droneGain: 0.3,
+    noise: { type: "lowpass", f: 500, q: 0.7, base: 0.03, move: 0.15, sweep: 120, wobbleHz: 0.2, wobble: 0.5 },
+    reverb: 0.5,
+  },
+};
+let theme = null, loadingTheme = false, overlayOpen = true, fallbackUsed = false, lastEvent = 0, voices = 0;
+window.MIDI = window.MIDI || {};
+window.MIDI.Soundfont = window.MIDI.Soundfont || {};
+const INST = {};
+
+// ---------- 소리 (Web Audio) ----------
+let AC = null;
+const N = {};
+
+function startAudio() {
+  if (AC) { if (AC.state !== "running") AC.resume(); return; }
+  AC = new (window.AudioContext || window.webkitAudioContext)();
+
+  N.master = AC.createGain(); N.master.gain.value = muted ? 0 : 0.6; N.master.connect(AC.destination);
+
+  // 잔향
+  N.verb = AC.createConvolver(); N.verb.buffer = makeImpulse(2.8);
+  N.wet = AC.createGain(); N.wet.gain.value = 0.4;
+  N.wet.connect(N.verb); N.verb.connect(N.master);
+
+  // MIDI 악기 버스: 음색(필터) + 패닝
+  N.midiIn = AC.createGain();
+  N.midiLP = AC.createBiquadFilter(); N.midiLP.type = "lowpass"; N.midiLP.frequency.value = 2000;
+  N.midiPan = AC.createStereoPanner();
+  N.midiIn.connect(N.midiLP); N.midiLP.connect(N.midiPan);
+  N.midiPan.connect(N.master); N.midiPan.connect(N.wet);
+
+  // 바탕음 (박동에 맞춰 숨쉬는 드론)
+  N.drone = { o: AC.createOscillator(), g: AC.createGain(), p: AC.createStereoPanner() };
+  N.drone.o.frequency.value = 110; N.drone.g.gain.value = 0;
+  N.drone.o.connect(N.drone.g); N.drone.g.connect(N.drone.p);
+  N.drone.p.connect(N.master); N.drone.p.connect(N.wet);
+  N.drone.o.start();
+
+  // 환경음 (물, 바스락거림, 바람)
+  const buf = AC.createBuffer(1, AC.sampleRate * 2, AC.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  const ns = AC.createBufferSource(); ns.buffer = buf; ns.loop = true;
+  N.noiseF = AC.createBiquadFilter();
+  N.noiseG = AC.createGain(); N.noiseG.gain.value = 0;
+  N.noiseP = AC.createStereoPanner();
+  ns.connect(N.noiseF); N.noiseF.connect(N.noiseG); N.noiseG.connect(N.noiseP);
+  N.noiseP.connect(N.master); N.noiseP.connect(N.wet);
+  ns.start();
+  updateButtons();
+}
+
+function makeImpulse(sec) {
+  const len = Math.floor(AC.sampleRate * sec);
+  const b = AC.createBuffer(2, len, AC.sampleRate);
+  for (let c = 0; c < 2; c++) {
+    const d = b.getChannelData(c);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+  }
+  return b;
+}
+
+function setP(param, v, tc) { param.setTargetAtTime(v, AC.currentTime, tc || 0.03); }
+
+// ---------- MIDI 악기 불러오기 ----------
+const NOTE_NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
+function noteName(m) { return NOTE_NAMES[m % 12] + (Math.floor(m / 12) - 1); }
+
+function loadScript(url, timeout) {
+  return new Promise((res, rej) => {
+    const s = document.createElement("script");
+    const t = setTimeout(() => rej(new Error("timeout")), timeout);
+    s.src = url; s.async = true;
+    s.onload = () => { clearTimeout(t); res(); };
+    s.onerror = () => { clearTimeout(t); rej(new Error("load")); };
+    document.head.appendChild(s);
+  });
+}
+
+function b64ToBuf(uri) {
+  const bin = atob(uri.slice(uri.indexOf(",") + 1));
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u.buffer;
+}
+
+function loadInstrument(name, notes) {
+  let inst = INST[name];
+  if (!inst) {
+    inst = INST[name] = { buffers: {}, failed: false, data: null };
+    inst.promise = loadScript(SF_URL + name + "-mp3.js", 20000)
+      .then(() => {
+        inst.data = window.MIDI.Soundfont[name];
+        if (!inst.data) throw new Error("no data");
+      })
+      .catch(() => { inst.failed = true; });
+  }
+  return inst.promise.then(() => {
+    if (inst.failed) return;
+    return Promise.all(notes.map((m) => {
+      if (inst.buffers[m]) return null;
+      const uri = inst.data[noteName(m)];
+      if (!uri) return null;
+      return AC.decodeAudioData(b64ToBuf(uri)).then((b) => { inst.buffers[m] = b; }).catch(() => {});
+    }));
+  });
+}
+
+function noteRange(a, b) {
+  const r = [];
+  for (let m = Math.max(21, a); m <= Math.min(108, b); m++) r.push(m);
+  return r;
+}
+
+async function chooseTheme(key) {
+  if (loadingTheme) return;
+  loadingTheme = true;
+  startAudio();
+  const t = THEMES[key];
+  const btns = document.querySelectorAll(".choice");
+  btns.forEach((b) => { b.disabled = true; });
+  setStatus(t.label + " 악기를 불러오는 중…");
+
+  const lo = 45 + t.transpose, hi = 81 + t.transpose;   // 110~880 Hz 범위를 테마 음역으로
+  await Promise.all([
+    loadInstrument(t.lead, noteRange(lo - 1, hi + 1)),
+    loadInstrument(t.accent, noteRange(lo + Math.min(...t.accentSteps) - 1, hi + Math.max(...t.accentSteps) + 1)),
+    loadInstrument(t.event, t.eventNotes),
+    t.texture ? loadInstrument(t.texture, noteRange(50, 70)) : null,
+  ]);
+
+  fallbackUsed = [t.lead, t.accent, t.event, t.texture].some((n) => n && INST[n].failed);
+  theme = t;
+  applyTheme();
+  btns.forEach((b) => { b.disabled = false; });
+  setStatus("");
+  loadingTheme = false;
+  closeChooser();
+}
+
+function applyTheme() {
+  if (!AC || !theme) return;
+  N.drone.o.type = theme.droneType;
+  N.noiseF.type = theme.noise.type;
+  N.noiseF.frequency.value = theme.noise.f;
+  N.noiseF.Q.value = theme.noise.q;
+  setP(N.wet.gain, theme.reverb, 0.3);
+}
+
+function findBuffer(inst, m) {
+  for (let k = 0; k <= 3; k++) {
+    if (inst.buffers[m + k]) return { b: inst.buffers[m + k], m: m + k };
+    if (inst.buffers[m - k]) return { b: inst.buffers[m - k], m: m - k };
+  }
+  return null;
+}
+
+function playNote(name, midiF, vel, dur) {
+  if (!AC || vel <= 0.01 || voices > 32) return;
+  midiF = Math.max(21, Math.min(108, midiF));
+  const inst = INST[name];
+  const found = inst && !inst.failed ? findBuffer(inst, Math.round(midiF)) : null;
+  const t0 = AC.currentTime + 0.005;
+  const g = AC.createGain();
+  g.connect(N.midiIn);
+  let src;
+  if (found) {
+    src = AC.createBufferSource();
+    src.buffer = found.b;
+    src.playbackRate.value = Math.pow(2, (midiF - found.m) / 12);   // 연속 음높이
+    g.gain.setValueAtTime(vel, t0);
+    g.gain.setTargetAtTime(0, t0 + dur * 0.6, dur * 0.25);
+  } else {
+    // 악기를 못 불러온 경우 합성음으로 대체
+    src = AC.createOscillator();
+    src.type = "sine";
+    src.frequency.value = 440 * Math.pow(2, (midiF - 69) / 12);
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(vel * 0.5, t0 + 0.01);
+    g.gain.setTargetAtTime(0, t0 + 0.02, dur * 0.3);
+  }
+  src.connect(g);
+  src.start(t0);
+  src.stop(t0 + dur + 1.2);
+  voices++;
+  src.onended = () => { voices--; g.disconnect(); };
+}
+
+// ---------- 선택 화면 ----------
+const chooser = document.getElementById("chooser");
+function setStatus(msg) { document.getElementById("chooserStatus").textContent = msg; }
+function openChooser() {
+  overlayOpen = true; dragging = false;
+  chooser.hidden = false;
+  const cur = theme ? Object.keys(THEMES).find((k) => THEMES[k] === theme) : "deep";
+  const b = chooser.querySelector('[data-key="' + cur + '"]');
+  if (b) b.focus();
+}
+function closeChooser() { overlayOpen = false; chooser.hidden = true; }
+document.querySelectorAll(".choice").forEach((b) => b.addEventListener("click", () => chooseTheme(b.dataset.key)));
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && overlayOpen && theme && !loadingTheme) closeChooser(); });
+
+// ---------- p5 ----------
+function setup() {
+  const c = createCanvas(1000, 600);
+  c.parent("sketch");
+  c.elt.setAttribute("role", "img");
+  c.elt.setAttribute("aria-label", "어둠 속 흰 부조를 빛으로 비추는 시뮬레이션과 반사 특징, 소리 값을 보여주는 화면");
+  frameRate(60);
+  textFont("Noto Sans KR");
+  buildRelief();
+  buildMinimap();
+  view = createImage(VW, VH);
+  bright = new Float32Array(VW * VH);
+  prevBright = new Float32Array(VW * VH);
+  trail = new Float32Array(VW * VH);
+  openChooser();
+}
+
+function draw() {
+  background(10, 14, 20);
+  const span = camD * FOV;
+
+  if (!dragging && !overlayOpen && pointerSeen && mouseX >= 0 && mouseX < VIEW_PX && mouseY >= 0 && mouseY < height) {
+    hitX = camX + (mouseX / VIEW_PX - 0.5) * span;
+    hitY = camY + (mouseY / VIEW_PX - 0.5) * span;
+  }
+
+  renderView(span);
+  updateSound(span);
+
+  image(view, 0, 0, VIEW_PX, VIEW_PX);
+  drawMarker(span);
+  drawPanel(span);
+  if (!AC || AC.state !== "running") drawStartHint();
+}
+
+// ---------- 반사 렌더링 + 특징 추출 ----------
+function renderView(span) {
+  const lx = camX, ly = camY - 0.04, lz = camD + 0.03;
+  let bx = hitX - lx, by = hitY - ly, bz = heightAt(hitX, hitY) - lz;
+  const bl = Math.hypot(bx, by, bz);
+  bx /= bl; by /= bl; bz /= bl;
+
+  let sum = 0, chg = 0, hi = 0, lit = 0, litSum = 0, litSq = 0, litEdge = 0;
+  view.loadPixels();
+  const px4 = view.pixels;
+
+  for (let j = 0; j < VH; j++) {
+    const py = camY + ((j + 0.5) / VH - 0.5) * span;
+    for (let i = 0; i < VW; i++) {
+      const px = camX + ((i + 0.5) / VW - 0.5) * span;
+      const idx = j * VW + i;
+
+      let pz = 0, nx = 0, ny = 0, nz = 1, alb = 0.12;
+      if (px >= 0 && px < 1 && py >= 0 && py < 1) {
+        const g = Math.floor(py * RES) * RES + Math.floor(px * RES);
+        pz = hMap[g]; nx = nxA[g]; ny = nyA[g]; nz = nzA[g]; alb = 0.92;
+      }
+
+      let tx = px - lx, ty = py - ly, tz = pz - lz;
+      const d2 = tx * tx + ty * ty + tz * tz, d = Math.sqrt(d2);
+      tx /= d; ty /= d; tz /= d;
+      const spot = smoothstepF(COS_OUT, COS_IN, tx * bx + ty * by + tz * bz);
+
+      let b = 0;
+      if (spot > 0) {
+        const diff = Math.max(0, -(nx * tx + ny * ty + nz * tz));
+        const vx = camX - px, vy = camY - py, vz = camD - pz;
+        const vl = Math.sqrt(vx * vx + vy * vy + vz * vz);
+        const hx = -tx + vx / vl, hy = -ty + vy / vl, hz = -tz + vz / vl;
+        const hl = Math.sqrt(hx * hx + hy * hy + hz * hz);
+        const ndh = Math.max(0, (nx * hx + ny * hy + nz * hz) / hl);
+        const spec = Math.pow(ndh, 30) * 0.45;
+        const x = spot * (diff + spec) * alb * POWER * led / d2;
+        b = 1 - Math.exp(-1.4 * x);
+      }
+      bright[idx] = b;
+
+      sum += b;
+      if (b > HI_THR) hi++;
+      chg += Math.abs(b - prevBright[idx]);
+
+      const e = (i > 0 && j > 0) ? Math.abs(b - bright[idx - 1]) + Math.abs(b - bright[idx - VW]) : 0;
+      if (spot > 0.5) { lit++; litSum += b; litSq += b * b; litEdge += e; }
+
+      const target = (b > HI_THR * 0.8 && e > 0.06) ? 1 : 0;
+      trail[idx] = Math.max(trail[idx] * 0.93, target);
+
+      const o = idx * 4;
+      if (hmdMode) {
+        const t = trail[idx];
+        px4[o] = 94 * t; px4[o + 1] = 240 * t; px4[o + 2] = 220 * t;
+      } else {
+        const v = b * 255;
+        px4[o] = v; px4[o + 1] = v; px4[o + 2] = v;
+      }
+      px4[o + 3] = 255;
+    }
+  }
+  view.updatePixels();
+  prevBright.set(bright);
+
+  const n = VW * VH;
+  let contrast = 0, edge = 0;
+  if (lit > 20) {
+    const m = litSum / lit;
+    contrast = Math.sqrt(Math.max(0, litSq / lit - m * m));
+    edge = litEdge / lit;
+  }
+  rawChange = frameCount < 5 ? 0 : chg / n;
+  fMean = lerp(fMean, sum / n, SMOOTH);
+  fArea = lerp(fArea, hi / n, SMOOTH);
+  fContrast = lerp(fContrast, contrast, SMOOTH);
+  fEdge = lerp(fEdge, edge, SMOOTH);
+}
+
+function updateSound(span) {
+  // 경로 A: 세로 → 음높이, 가로 → 박동 속도 (기존 그대로)
+  const v = constrain(hitY, 0, 1), u = constrain(hitX, 0, 1);
+  let target = 110 * Math.pow(2, (1 - v) * 3);
+  if (quantize) target = quantizePenta(target);
+  curFreq = lerp(curFreq, target, quantize ? 0.5 : 0.15);
+
+  const tr = theme ? theme.transpose : 0;
+  outFreq = curFreq * Math.pow(2, tr / 12);   // 테마별 음역 이동
+  outRate = Math.pow(10, u);
+  outPan = constrain((hitX - camX) / (span * 0.5), -1, 1);
+  outCutoff = 300 + fContrast * 8000;
+
+  phase += TWO_PI * outRate * Math.min(deltaTime, 100) / 1000;
+  let pulse = false;
+  if (phase >= TWO_PI) { phase -= TWO_PI; pulse = true; }
+  const gate = 0.25 + 0.75 * Math.pow(0.5 + 0.5 * Math.cos(phase), 4);
+
+  hissAmp = Math.max(hissAmp * EVENT_DECAY, constrain((rawChange - EVENT_THR) * EVENT_GAIN, 0, 0.3));
+
+  if (!AC || !theme) return;
+  const t = theme;
+
+  // 바탕음과 환경음
+  const droneA = constrain(fMean * DRONE_GAIN, 0, 0.3) * gate * t.droneGain;
+  setP(N.drone.o.frequency, outFreq * t.droneMul); setP(N.drone.g.gain, droneA, 0.012); setP(N.drone.p.pan, outPan);
+  const sec = millis() / 1000;
+  const swell = Math.sin(TWO_PI * t.noise.wobbleHz * sec);          // 천천히 부풀었다 가라앉는 물결
+  setP(N.noiseF.frequency, t.noise.f + swell * t.noise.sweep, 0.2);
+  setP(N.noiseG.gain, t.noise.base * (1 + t.noise.wobble * swell) + hissAmp * t.noise.move, 0.08);
+  setP(N.noiseP.pan, outPan * 0.5);
+
+  // 경로 B: 대비 → 악기 음색, 머리 기준 방향 → 패닝
+  setP(N.midiLP.frequency, outCutoff);
+  setP(N.midiPan.pan, outPan);
+
+  // 박동마다 MIDI 악기 한 음 (세기 = 밝기, 겹음 확률 = 결과 하이라이트)
+  if (pulse && !overlayOpen) {
+    const vel = constrain(fMean * 6, 0, 1);
+    if (vel > 0.05) {
+      const m = 69 + 12 * Math.log2(outFreq / 440);
+      const dur = constrain(1.6 / Math.sqrt(outRate), 0.25, 1.6) * t.durMul;
+      playNote(t.lead, m, vel * t.leadGain, dur);
+      if (t.texture) playNote(t.texture, 60 + (m - 57) * 0.25, vel * t.textureGain, dur);   // 파도가 철썩
+      const p = constrain(fEdge * 15 + fArea * 5, 0, 0.8);
+      if (Math.random() < p) playNote(t.accent, m + random(t.accentSteps), vel * t.accentGain, dur);
+    }
+  }
+
+  // 변화량 → 풍경 이벤트 (물결, 새소리, 합창)
+  if (!overlayOpen && rawChange > EVENT_THR * 2 && millis() - lastEvent > t.eventCooldown) {
+    lastEvent = millis();
+    const ev = constrain((rawChange - EVENT_THR) * EVENT_GAIN * 2, 0.15, 1);
+    playNote(t.event, random(t.eventNotes), ev * t.eventGain, 1.5);
+  }
+}
+
+function quantizePenta(f) {
+  const scale = [0, 3, 5, 7, 10], base = 57;
+  let m = Math.round(69 + 12 * Math.log2(f / 440));
+  while (!scale.includes(((m - base) % 12 + 12) % 12)) m--;
+  return 440 * Math.pow(2, (m - 69) / 12);
+}
+
+// ---------- 부조 ----------
+function buildRelief() {
+  const h = new Float32Array(RES * RES);
+  for (let j = 0; j < RES; j++) {
+    for (let i = 0; i < RES; i++) {
+      const x = (i + 0.5) / RES, y = (j + 0.5) / RES;
+      let v = 0;
+      const r = Math.max(Math.abs(x - 0.27), Math.abs(y - 0.27));
+      if (r < 0.19 && Math.floor(r / 0.038) % 2 === 0) v += 0.010;
+      const d = Math.hypot(x - 0.72, y - 0.27);
+      if (d < 0.17) v += 0.07 * Math.sqrt(1 - (d / 0.17) ** 2);
+      if (x > 0.08 && x < 0.92 && y > 0.56 && y < 0.92) {
+        const t = (y - 0.56) / 0.36 * 8;
+        if (t - Math.floor(t) < 0.45) v += 0.008;
+      }
+      h[j * RES + i] = v;
+    }
+  }
+  hMap = blur(blur(h));
+  nxA = new Float32Array(RES * RES); nyA = new Float32Array(RES * RES); nzA = new Float32Array(RES * RES);
+  const cell = 1 / RES;
+  for (let j = 0; j < RES; j++) {
+    for (let i = 0; i < RES; i++) {
+      const il = Math.max(i - 1, 0), ir = Math.min(i + 1, RES - 1), ju = Math.max(j - 1, 0), jd = Math.min(j + 1, RES - 1);
+      const gx = (hMap[j * RES + ir] - hMap[j * RES + il]) / ((ir - il) * cell);
+      const gy = (hMap[jd * RES + i] - hMap[ju * RES + i]) / ((jd - ju) * cell);
+      const l = Math.sqrt(gx * gx + gy * gy + 1), k = j * RES + i;
+      nxA[k] = -gx / l; nyA[k] = -gy / l; nzA[k] = 1 / l;
+    }
+  }
+}
+
+function blur(s) {
+  const o = new Float32Array(RES * RES);
+  for (let j = 0; j < RES; j++) {
+    for (let i = 0; i < RES; i++) {
+      let acc = 0, c = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const x = i + dx, y = j + dy;
+        if (x >= 0 && x < RES && y >= 0 && y < RES) { acc += s[y * RES + x]; c++; }
+      }
+      o[j * RES + i] = acc / c;
+    }
+  }
+  return o;
+}
+
+function heightAt(x, y) {
+  if (x < 0 || x >= 1 || y < 0 || y >= 1) return 0;
+  return hMap[Math.floor(y * RES) * RES + Math.floor(x * RES)];
+}
+
+function smoothstepF(e0, e1, x) {
+  const t = constrain((x - e0) / (e1 - e0), 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+// ---------- 화면 ----------
+function buildMinimap() {
+  mini = createImage(MINI, MINI);
+  mini.loadPixels();
+  let lx = -0.5, ly = -0.6, lz = 0.62;
+  const l = Math.hypot(lx, ly, lz); lx /= l; ly /= l; lz /= l;
+  for (let j = 0; j < MINI; j++) {
+    for (let i = 0; i < MINI; i++) {
+      const g = Math.floor((j + 0.5) / MINI * RES) * RES + Math.floor((i + 0.5) / MINI * RES);
+      const s = (0.18 + 0.5 * Math.max(0, nxA[g] * lx + nyA[g] * ly + nzA[g] * lz)) * 0.7 * 255;
+      const o = (j * MINI + i) * 4;
+      mini.pixels[o] = s * 0.85; mini.pixels[o + 1] = s * 0.95; mini.pixels[o + 2] = s; mini.pixels[o + 3] = 255;
+    }
+  }
+  mini.updatePixels();
+}
+
+function drawMarker(span) {
+  const sx = ((hitX - camX) / span + 0.5) * VIEW_PX;
+  const sy = ((hitY - camY) / span + 0.5) * VIEW_PX;
+  noFill(); stroke(94, 240, 220, dragging ? 220 : 110); strokeWeight(1.5);
+  ellipse(sx, sy, 16, 16);
+  strokeWeight(1);
+  if (dragging) {
+    noStroke(); fill(94, 240, 220); textSize(13); textStyle(NORMAL);
+    text("머리 이동 중, 빛은 이 지점에 고정", 14, 24);
+  }
+  stroke(40); line(VIEW_PX, 0, VIEW_PX, height);
+}
+
+function drawPanel(span) {
+  const x0 = VIEW_PX + 20, my = 32;
+  textSize(13); textStyle(NORMAL); noStroke();
+  fill(150); text("부조 전체 (위에서 본 모습)", x0, 22);
+  image(mini, x0, my);
+
+  const ctx = drawingContext;
+  ctx.save(); ctx.beginPath(); ctx.rect(x0, my, MINI, MINI); ctx.clip();
+  noFill(); stroke(94, 240, 220, 150);
+  rect(x0 + (camX - span / 2) * MINI, my + (camY - span / 2) * MINI, span * MINI, span * MINI);
+  const cx = x0 + camX * MINI, cy = my + camY * MINI, hx = x0 + hitX * MINI, hy = my + hitY * MINI;
+  stroke(94, 240, 220, 120); line(cx, cy, hx, hy);
+  noStroke(); fill(255, 230); ellipse(cx, cy, 8, 8);
+  fill(94, 240, 220); ellipse(hx, hy, 8, 8);
+  ctx.restore();
+
+  const lx = x0 + MINI + 16;
+  noStroke();
+  fill(230); text("흰색: 머리 위치", lx, my + 14);
+  fill(94, 240, 220); text("청록: 빛 닿는 곳", lx, my + 34);
+  fill(150);
+  text("거리  " + nf(camD, 0, 2), lx, my + 70);
+  text("LED  " + Math.round(led * 100) + "%", lx, my + 90);
+  text(hmdMode ? "보기: HMD" : "보기: 카메라", lx, my + 110);
+  text(quantize ? "음계: 펜타토닉" : "음계: 연속", lx, my + 130);
+  if (theme) { fill(theme.color[0], theme.color[1], theme.color[2]); text("풍경: " + theme.label, lx, my + 150); }
+  if (muted) { fill(240, 120, 110); text("음소거", lx, my + 170); }
+
+  const by = 262;
+  fill(94, 240, 220); text("반사 특징 (경로 B)", x0, by - 18);
+  bar("평균 밝기", fMean * 4, x0, by);
+  bar("하이라이트 면적", fArea * 8, x0, by + 22);
+  bar("대비", fContrast * 4, x0, by + 44);
+  bar("결 (엣지)", fEdge * 10, x0, by + 66);
+  bar("변화량", hissAmp / 0.3, x0, by + 88);
+
+  const sy = 404;
+  fill(94, 240, 220); text("소리", x0, sy);
+  fill(210);
+  text("음높이  " + Math.round(outFreq) + " Hz   ← 빛의 세로 위치", x0, sy + 22);
+  text("박동  " + nf(outRate, 0, 1) + " Hz   ← 빛의 가로 위치", x0, sy + 42);
+  text("패닝  " + nf(outPan, 0, 2) + "   ← 머리 기준 빛 방향", x0, sy + 62);
+  text("음색  " + Math.round(outCutoff) + " Hz   ← 대비", x0, sy + 82);
+  if (fallbackUsed) { fill(240, 120, 110); text("일부 악기를 불러오지 못해 합성음으로 대체 중", x0, sy + 104); }
+
+  fill(110);
+  text("마우스 이동: 빛 위치 / 드래그: 머리 이동", x0, 532);
+  text("휠: 거리 / ↑↓: LED / S: 소리 풍경 바꾸기", x0, 552);
+  text("V: HMD 보기 / Q: 음계 / M: 소리 / R: 초기화", x0, 572);
+}
+
+function bar(label, v, x, y) {
+  noStroke();
+  fill(170); text(label, x, y);
+  fill(30, 40, 52); rect(x + 120, y - 10, 220, 10, 3);
+  fill(94, 240, 220); rect(x + 120, y - 10, 220 * constrain(v, 0, 1), 10, 3);
+}
+
+function drawStartHint() {
+  //noStroke(); fill(5, 10, 18, 210); rect(0, 262, VIEW_PX, 76);
+  //fill(94, 240, 220); textSize(16); textStyle(BOLD); textAlign(CENTER, CENTER);
+  //text("화면을 클릭하면 소리가 켜집니다", VIEW_PX / 2, 300);
+  //textAlign(LEFT, BASELINE); textStyle(NORMAL); textSize(13);
+}
+
+// ---------- 입력 ----------
+function overView() { return mouseX >= 0 && mouseX < VIEW_PX && mouseY >= 0 && mouseY < height; }
+
+function mouseMoved() { pointerSeen = true; }
+
+function mousePressed() {
+  if (overlayOpen || !overView()) return;
+  pointerSeen = true;
+  startAudio();
+  if (mouseButton === LEFT) { dragging = true; lastX = mouseX; lastY = mouseY; }
+}
+
+function mouseReleased() { dragging = false; }
+
+function mouseDragged() {
+  if (!dragging) return;
+  const span = camD * FOV;
+  camX = constrain(camX + (mouseX - lastX) * span / VIEW_PX, -0.3, 1.3);
+  camY = constrain(camY + (mouseY - lastY) * span / VIEW_PX, -0.3, 1.3);
+  lastX = mouseX; lastY = mouseY;
+}
+
+function mouseWheel(event) {
+  if (overlayOpen || !overView()) return true;
+  camD = constrain(camD + Math.sign(event.delta) * 0.03, 0.25, 1.4);
+  return false;
+}
+
+function touchStarted() {
+  if (overlayOpen || !overView()) return true;
+  pointerSeen = true;
+  startAudio();
+  return false;
+}
+function touchMoved() { return (!overlayOpen && overView()) ? false : true; }
+
+function keyPressed() {
+  if (overlayOpen) return true;
+  const k = key.toLowerCase();
+  if (k === "v") toggleHmd();
+  else if (k === "q") toggleQuant();
+  else if (k === "m") toggleSound();
+  else if (k === "r") resetCam();
+  else if (k === "s") openChooser();
+  else if (keyCode === UP_ARROW) changeLed(0.1);
+  else if (keyCode === DOWN_ARROW) changeLed(-0.1);
+  else return true;
+  return false;
+}
+
+// ---------- 버튼 ----------
+function toggleSound() {
+  if (!AC || AC.state !== "running") { muted = false; startAudio(); if (N.master) N.master.gain.value = 0.6; }
+  else { muted = !muted; setP(N.master.gain, muted ? 0 : 0.6, 0.05); }
+  updateButtons();
+}
+function toggleHmd() { hmdMode = !hmdMode; updateButtons(); }
+function toggleQuant() { quantize = !quantize; updateButtons(); }
+function changeLed(d) { led = constrain(led + d, 0.1, 2); }
+function resetCam() { camX = 0.5; camY = 0.45; camD = 0.7; }
+
+function updateButtons() {}
+</script>
+</body>
+</html>
